@@ -4,12 +4,11 @@ import { redirect } from "next/navigation";
 import { registerSchema, loginSchema, resetPasswordSchema } from "@/lib/validators/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ROLE_HOME } from "@/lib/constants";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 async function ensureProfile(input: { id: string; email: string; fullName?: string | null }) {
-  const admin = createAdminClient();
+  const supabase = await createClient();
 
-  const { data: existing, error: readError } = await admin
+  const { data: existing, error: readError } = await supabase
     .from("profiles")
     .select("id,role")
     .eq("id", input.id)
@@ -23,7 +22,7 @@ async function ensureProfile(input: { id: string; email: string; fullName?: stri
     return existing;
   }
 
-  const { data: created, error: insertError } = await admin
+  const { data: created, error: insertError } = await supabase
     .from("profiles")
     .insert({
       id: input.id,

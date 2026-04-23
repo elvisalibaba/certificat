@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PublicHeader } from "@/components/public-header";
 
-export default function RegisterPage() {
+export default async function RegisterPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  const params = await searchParams;
   return (
     <div className="min-h-screen bg-stone-50">
       <PublicHeader />
@@ -16,6 +17,9 @@ export default function RegisterPage() {
             <CardDescription>Creer un compte pour soumettre vos produits.</CardDescription>
           </CardHeader>
           <CardContent>
+            {params.error ? (
+              <p className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{params.error}</p>
+            ) : null}
             <form action={registerAction} className="space-y-4">
               <div>
                 <Label htmlFor="fullName">Nom complet</Label>

@@ -22,7 +22,7 @@ async function ensureProfile(input: { id: string; email: string; fullName?: stri
     return existing;
   }
 
-  const { data: created, error: insertError } = await supabase
+  const { data: created } = await supabase
     .from("profiles")
     .insert({
       id: input.id,
@@ -33,11 +33,7 @@ async function ensureProfile(input: { id: string; email: string; fullName?: stri
     .select("id,role")
     .single();
 
-  if (insertError) {
-    throw new Error(`Creation profil impossible: ${insertError.message}`);
-  }
-
-  return created;
+  return created ?? { id: input.id, role: "artisan" as const };
 }
 
 export async function loginAction(formData: FormData) {
@@ -45,22 +41,27 @@ export async function loginAction(formData: FormData) {
     email: formData.get("email"),
     password: formData.get("password"),
   });
-  if (!parsed.success) throw new Error("Identifiants invalides.");
+  if (!parsed.success) redirect("/login?error=Identifiants%20invalides");
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
-  if (error) throw new Error(error.message);
+  if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
 
   const user = data.user;
   if (!user?.id || !user.email) {
-    throw new Error("Session utilisateur introuvable apres connexion.");
+    redirect("/login?error=Session%20introuvable%20apres%20connexion");
   }
 
-  const profile = await ensureProfile({
-    id: user.id,
-    email: user.email,
-    fullName: user.user_metadata?.full_name as string | undefined,
-  });
+  let profile: { id: string; role: keyof typeof ROLE_HOME } | null = null;
+  try {
+    profile = await ensureProfile({
+      id: user.id,
+      email: user.email,
+      fullName: user.user_metadata?.full_name as string | undefined,
+    });
+  } catch {
+    profile = { id: user.id, role: "artisan" };
+  }
 
   redirect(ROLE_HOME[profile?.role as keyof typeof ROLE_HOME] ?? "/artisan/dashboard");
 }
@@ -71,7 +72,7 @@ export async function registerAction(formData: FormData) {
     email: formData.get("email"),
     password: formData.get("password"),
   });
-  if (!parsed.success) throw new Error("Informations d'inscription invalides.");
+  if (!parsed.success) redirect("/register?error=Informations%20d%27inscription%20invalides");
 
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
@@ -79,14 +80,18 @@ export async function registerAction(formData: FormData) {
     password: parsed.data.password,
     options: { data: { full_name: parsed.data.fullName } },
   });
-  if (error) throw new Error(error.message);
+  if (error) redirect(`/register?error=${encodeURIComponent(error.message)}`);
 
   if (data.user?.id && data.user.email) {
-    await ensureProfile({
-      id: data.user.id,
-      email: data.user.email,
-      fullName: parsed.data.fullName,
-    });
+    try {
+      await ensureProfile({
+        id: data.user.id,
+        email: data.user.email,
+        fullName: parsed.data.fullName,
+      });
+    } catch {
+      // Fallback: the dashboard/session flow can still derive an artisan profile.
+    }
   }
 
   redirect(data.session ? "/artisan/dashboard" : "/login");

@@ -4,6 +4,42 @@ import { redirect } from "next/navigation";
 import { registerSchema, loginSchema, resetPasswordSchema } from "@/lib/validators/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ROLE_HOME } from "@/lib/constants";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+async function ensureProfile(input: { id: string; email: string; fullName?: string | null }) {
+  const admin = createAdminClient();
+
+  const { data: existing, error: readError } = await admin
+    .from("profiles")
+    .select("id,role")
+    .eq("id", input.id)
+    .maybeSingle();
+
+  if (readError) {
+    throw new Error(`Lecture profil impossible: ${readError.message}`);
+  }
+
+  if (existing) {
+    return existing;
+  }
+
+  const { data: created, error: insertError } = await admin
+    .from("profiles")
+    .insert({
+      id: input.id,
+      email: input.email,
+      full_name: input.fullName ?? null,
+      role: "artisan",
+    })
+    .select("id,role")
+    .single();
+
+  if (insertError) {
+    throw new Error(`Creation profil impossible: ${insertError.message}`);
+  }
+
+  return created;
+}
 
 export async function loginAction(formData: FormData) {
   const parsed = loginSchema.safeParse({
@@ -13,14 +49,19 @@ export async function loginAction(formData: FormData) {
   if (!parsed.success) throw new Error("Identifiants invalides.");
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword(parsed.data);
+  const { data, error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) throw new Error(error.message);
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("email", parsed.data.email)
-    .single();
+  const user = data.user;
+  if (!user?.id || !user.email) {
+    throw new Error("Session utilisateur introuvable apres connexion.");
+  }
+
+  const profile = await ensureProfile({
+    id: user.id,
+    email: user.email,
+    fullName: user.user_metadata?.full_name as string | undefined,
+  });
 
   redirect(ROLE_HOME[profile?.role as keyof typeof ROLE_HOME] ?? "/artisan/dashboard");
 }
@@ -34,14 +75,22 @@ export async function registerAction(formData: FormData) {
   if (!parsed.success) throw new Error("Informations d'inscription invalides.");
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: parsed.data.email,
     password: parsed.data.password,
     options: { data: { full_name: parsed.data.fullName } },
   });
   if (error) throw new Error(error.message);
 
-  redirect("/artisan/dashboard");
+  if (data.user?.id && data.user.email) {
+    await ensureProfile({
+      id: data.user.id,
+      email: data.user.email,
+      fullName: parsed.data.fullName,
+    });
+  }
+
+  redirect(data.session ? "/artisan/dashboard" : "/login");
 }
 
 export async function resetPasswordAction(formData: FormData) {
